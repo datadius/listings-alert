@@ -13,7 +13,7 @@ import (
 )
 
 type Tree_News struct {
-	title string
+	Title string `json:"title"`
 }
 
 type Listing string
@@ -51,7 +51,7 @@ func parse_title(message string) ([][]string, Listing, error) {
 
 	re := regexp.MustCompile(regex)
 	//find all captures group
-	matches := re.FindAllStringSubmatch(message, -1)
+	matches := re.FindAllStringSubmatch(message, 2)
 	return matches, listing, nil
 }
 
@@ -92,15 +92,13 @@ func main() {
 				return
 			}
 
-			symbols, listing, err := parse_title(tree_news.title)
+			symbols, listing, err := parse_title(tree_news.Title)
 			if err != nil {
 				log.Println("parse_title:", err)
 				return
 			}
 
-			for _, symbol := range symbols {
-				log.Printf("recv: %s, listing: %s, symbol: %s", message, listing, symbol)
-			}
+			log.Printf("recv: %s, listing: %s, symbol: %s", tree_news.Title, listing, symbols)
 		}
 	}()
 

@@ -58,9 +58,69 @@ func parse_title(message string) ([][]string, Listing, error) {
 
 	re := regexp.MustCompile(regex)
 	//find all captures group
-	matches := re.FindAllStringSubmatch(message, 2)
+	matches := re.FindAllStringSubmatch(message, 3)
 
 	return matches, listing, nil
+}
+
+func (l Listing) String() string {
+	switch l {
+	case BinanceListing:
+		return "Binance Listing"
+	case UpbitListing:
+		return "Upbit Listing"
+	case BinanceFuturesListing:
+		return "Binance Futures Listing"
+	case BithumbListing:
+		return "Bithumb Listing"
+	default:
+		return "No Listing"
+	}
+}
+
+func send_discord_message(listing Listing, symbols [][]string) string {
+
+	bodyString := listing.String() + ":"
+	for _, symbol := range symbols {
+		if symbol[1] != "" {
+			bodyString = bodyString + "\n" + symbol[1]
+		}
+	}
+
+	body := ListingDiscordMessage{
+		Content: bodyString,
+	}
+
+	bodyBytes, err := json.Marshal(&body)
+	if err != nil {
+		log.Println("Marshall post message: ", err)
+	}
+
+	reader := bytes.NewReader(bodyBytes)
+
+	var req *http.Response
+	req, err = http.Post(os.Getenv("personal_test_webhook"), "application/json", reader)
+	if err != nil {
+		log.Println("Post:", err)
+	}
+
+	defer func() {
+		err := req.Body.Close()
+		if err != nil {
+			log.Println("Body close: ", err)
+		}
+	}()
+
+	responseBody, err := io.ReadAll(req.Body)
+	if err != nil {
+		log.Println("Read response body: ", err)
+	}
+
+	if req.StatusCode >= 400 && req.StatusCode <= 500 {
+		log.Println("Error response. Status Code: ", req.StatusCode)
+	}
+
+	return string(responseBody)
 }
 
 func main() {
@@ -82,8 +142,6 @@ func main() {
 	defer c.Close()
 
 	done := make(chan struct{})
-
-	discordWeebhookUrl := os.Getenv("personal_test_webhook")
 
 	go func() {
 		defer close(done)
@@ -110,40 +168,9 @@ func main() {
 
 			log.Printf("recv: %s, listing: %s, symbol: %s", tree_news.Title, listing, symbols)
 
-			body := ListingDiscordMessage{
-				Content: tree_news.Title,
+			if listing != NoListing {
+				send_discord_message(listing, symbols)
 			}
-
-			bodyBytes, err := json.Marshal(&body)
-			if err != nil {
-				log.Println("Marshall post message: ", err)
-			}
-
-			reader := bytes.NewReader(bodyBytes)
-
-			var req *http.Response
-			req, err = http.Post(discordWeebhookUrl, "application/json", reader)
-			if err != nil {
-				log.Println("Post:", err)
-			}
-
-			defer func() {
-				err := req.Body.Close()
-				if err != nil {
-					log.Println("Body close: ", err)
-				}
-			}()
-
-			responseBody, err := io.ReadAll(req.Body)
-			if err != nil {
-				log.Println("Read response body: ", err)
-			}
-
-			if req.StatusCode >= 400 && req.StatusCode <= 500 {
-				log.Println("Error response. Status Code: ", req.StatusCode)
-			}
-
-			log.Println("Response: ", string(responseBody))
 		}
 	}()
 

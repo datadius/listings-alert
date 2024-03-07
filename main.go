@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"github.com/gorilla/websocket"
+	"io"
 	"log"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -18,6 +21,10 @@ type Tree_News struct {
 
 type Listing string
 
+type ListingDiscordMessage struct {
+	Content string `json:"content"`
+}
+
 const (
 	BinanceListing        Listing = "BinanceListing"
 	UpbitListing                  = "UpbitListing"
@@ -30,13 +37,13 @@ var addr = flag.String("addr", "news.treeofalpha.com", "http service address")
 
 func title_regex(message string) (string, Listing, error) {
 	if match, _ := regexp.MatchString("Binance Will List", message); match {
-		return `\([\p{Nd}]*([^()]+)\)`, BinanceListing, nil
+		return `[\( ]\d*(\w*)[,\)]`, BinanceListing, nil
 	} else if match, _ := regexp.MatchString("마켓 디지털 자산 추가", message); match {
 		return `[\( ](\w*)[,\)]`, UpbitListing, nil
 	} else if match, _ := regexp.MatchString("Binance Futures Will Launch USDⓈ-M", message); match {
 		return `Binance Futures Will Launch USDⓈ-M\s*(.*?)\s*Perpetual Contract`, BinanceFuturesListing, nil
 	} else if match, _ := regexp.MatchString("원화 마켓 추가", message); match {
-		return `\([\p{Nd}]*([^()]+)\)`, BithumbListing, nil
+		return `[\( ](\w*)[,\)]`, BithumbListing, nil
 	} else {
 		return "", NoListing, nil
 	}
@@ -52,6 +59,7 @@ func parse_title(message string) ([][]string, Listing, error) {
 	re := regexp.MustCompile(regex)
 	//find all captures group
 	matches := re.FindAllStringSubmatch(message, 2)
+
 	return matches, listing, nil
 }
 
@@ -74,6 +82,8 @@ func main() {
 	defer c.Close()
 
 	done := make(chan struct{})
+
+	discordWeebhookUrl := os.Getenv("personal_test_webhook")
 
 	go func() {
 		defer close(done)
@@ -99,6 +109,41 @@ func main() {
 			}
 
 			log.Printf("recv: %s, listing: %s, symbol: %s", tree_news.Title, listing, symbols)
+
+			body := ListingDiscordMessage{
+				Content: tree_news.Title,
+			}
+
+			bodyBytes, err := json.Marshal(&body)
+			if err != nil {
+				log.Println("Marshall post message: ", err)
+			}
+
+			reader := bytes.NewReader(bodyBytes)
+
+			var req *http.Response
+			req, err = http.Post(discordWeebhookUrl, "application/json", reader)
+			if err != nil {
+				log.Println("Post:", err)
+			}
+
+			defer func() {
+				err := req.Body.Close()
+				if err != nil {
+					log.Println("Body close: ", err)
+				}
+			}()
+
+			responseBody, err := io.ReadAll(req.Body)
+			if err != nil {
+				log.Println("Read response body: ", err)
+			}
+
+			if req.StatusCode >= 400 && req.StatusCode <= 500 {
+				log.Println("Error response. Status Code: ", req.StatusCode)
+			}
+
+			log.Println("Response: ", string(responseBody))
 		}
 	}()
 

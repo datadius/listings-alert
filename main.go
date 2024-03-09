@@ -37,6 +37,8 @@ func getTradePairs(url url.URL) []string {
 		log.Println("Read response body: ", err)
 	}
 
+	log.Printf("Response Body: %s", responseBody)
+
 	if req.StatusCode >= 400 && req.StatusCode <= 500 {
 		log.Println("Error response. Status Code: ", req.StatusCode)
 	}
@@ -128,7 +130,7 @@ func ReadFromFile(filename string) []string {
 	}
 
 	log.Printf("File %s read", filename)
-	log.Printf("Slice size %s", len(tradePairs))
+	log.Printf("Slice size %d", len(tradePairs))
 
 	return tradePairs
 }

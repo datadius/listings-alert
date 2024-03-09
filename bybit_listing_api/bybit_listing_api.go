@@ -127,6 +127,51 @@ func ReadFromFile(filename string) []string {
 	return tradePairs
 }
 
+type ListingDiscordMessage struct {
+	Content string `json:"content"`
+}
+
+func SendDiscordMessage(tradePairs []string, category string) {
+	for _, pair := range tradePairs {
+		discordContent := pair + " opened for trading on Bybit " + category
+		body := ListingDiscordMessage{
+			Content: discordContent,
+		}
+
+		bodyBytes, err := json.Marshal(&body)
+		if err != nil {
+			log.Println("Marshall post message: ", err)
+		}
+
+		reader := bytes.NewReader(bodyBytes)
+
+		var req *http.Response
+		req, err = http.Post(os.Getenv("personal_test_webhook"), "application/json", reader)
+		if err != nil {
+			log.Println("Post:", err)
+		}
+
+		defer func() {
+			err := req.Body.Close()
+			if err != nil {
+				log.Println("Body close: ", err)
+			}
+		}()
+
+		requestBody, err := io.ReadAll(req.Body)
+		if err != nil {
+			log.Println("Read response body: ", err)
+		}
+
+		if req.StatusCode >= 400 && req.StatusCode <= 500 {
+			log.Println("Error response. Status Code: ", req.StatusCode)
+		}
+
+		log.Printf("Discord Request Body: %s", requestBody)
+	}
+
+}
+
 func main() {
 
 	urlSpot := url.URL{
@@ -150,14 +195,15 @@ func main() {
 
 		diffSpot := Difference(spotPairs, oldSpotPairs)
 
-		log.Println("Spot Pairs: ", strings.Join(diffSpot, ", "))
+		SendDiscordMessage(diffSpot, "Spot")
+
 	}
 	if _, err := os.Stat("futures_pairs.json"); err == nil {
 		oldFuturesPairs := ReadFromFile("futures_pairs.json")
 
 		diffFutures := Difference(futuresPairs, oldFuturesPairs)
 
-		log.Println("Futures Pairs: ", strings.Join(diffFutures, ", "))
+		SendDiscordMessage(diffFutures, "Futures")
 	}
 
 	SaveToFile(spotPairs, "spot_pairs.json")

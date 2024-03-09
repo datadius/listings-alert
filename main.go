@@ -3,108 +3,28 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
-	"github.com/gorilla/websocket"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
-	"os/signal"
-	"regexp"
-	"time"
+	"strings"
 )
 
-type Tree_News struct {
-	Title string `json:"title"`
+type TradePairsResponse struct {
+	Result struct {
+		List []struct {
+			Symbol string `json:"symbol"`
+		} `json:"list"`
+	} `json:"result"`
 }
 
-type Listing string
-
-type ListingDiscordMessage struct {
-	Content string `json:"content"`
-}
-
-const (
-	BinanceListing        Listing = "BinanceListing"
-	UpbitListing                  = "UpbitListing"
-	BinanceFuturesListing         = "BinanceFuturesListing"
-	BithumbListing                = "BithumbListing"
-	NoListing                     = "NoListing"
-)
-
-var addr = flag.String("addr", "news.treeofalpha.com", "http service address")
-
-func title_regex(message string) (string, Listing, error) {
-	if match, _ := regexp.MatchString("Binance Will List", message); match {
-		return `[\( ]\d*(\w*)[,\)]`, BinanceListing, nil
-	} else if match, _ := regexp.MatchString("마켓 디지털 자산 추가", message); match {
-		return `[\( ](\w*)[,\)]`, UpbitListing, nil
-	} else if match, _ := regexp.MatchString("Binance Futures Will Launch USDⓈ-M", message); match {
-		return `Binance Futures Will Launch USDⓈ-M\s*(.*?)\s*Perpetual Contract`, BinanceFuturesListing, nil
-	} else if match, _ := regexp.MatchString("원화 마켓 추가", message); match {
-		return `[\( ](\w*)[,\)]`, BithumbListing, nil
-	} else {
-		return "", NoListing, nil
-	}
-}
-
-func parse_title(message string) ([][]string, Listing, error) {
-	regex, listing, err := title_regex(message)
-	if err != nil {
-		//I hate this ngl
-		return nil, NoListing, err
-	}
-
-	re := regexp.MustCompile(regex)
-	//find all captures group
-	matches := re.FindAllStringSubmatch(message, 3)
-
-	return matches, listing, nil
-}
-
-func (l Listing) String() string {
-	switch l {
-	case BinanceListing:
-		return "Binance Listing"
-	case UpbitListing:
-		return "Upbit Listing"
-	case BinanceFuturesListing:
-		return "Binance Futures Listing"
-	case BithumbListing:
-		return "Bithumb Listing"
-	default:
-		return "No Listing"
-	}
-}
-
-func send_discord_message(listing Listing, symbols [][]string) string {
-
-	bodyString := ""
-	for _, symbol := range symbols {
-		if symbol[1] != "" {
-			// Add time to the message
-			bodyString = bodyString + symbol[1] + " " + listing.String() + "\n"
-		}
-	}
-
-	body := ListingDiscordMessage{
-		Content: bodyString,
-	}
-
-	bodyBytes, err := json.Marshal(&body)
-	if err != nil {
-		log.Println("Marshall post message: ", err)
-	}
-
-	reader := bytes.NewReader(bodyBytes)
-
+func getTradePairs(url url.URL) []string {
 	var req *http.Response
-	req, err = http.Post(os.Getenv("personal_test_webhook"), "application/json", reader)
+	req, err := http.Get(url.String())
 	if err != nil {
-		log.Println("Post:", err)
+		log.Fatalln(err)
 	}
-
 	defer func() {
 		err := req.Body.Close()
 		if err != nil {
@@ -121,91 +41,171 @@ func send_discord_message(listing Listing, symbols [][]string) string {
 		log.Println("Error response. Status Code: ", req.StatusCode)
 	}
 
-	return string(responseBody)
+	var tradePairs TradePairsResponse
+	err = json.Unmarshal(responseBody, &tradePairs)
+	if err != nil {
+		log.Println("Unmarshal:", err)
+	}
+
+	tradePairsList := []string{}
+	for _, pair := range tradePairs.Result.List {
+		// Filter out pairs with USDT
+		filterPairs := strings.Contains(pair.Symbol, "USDT") &&
+			!strings.Contains(pair.Symbol, "2LUSDT") &&
+			!strings.Contains(pair.Symbol, "2SUSDT") &&
+			!strings.Contains(pair.Symbol, "3LUSDT") &&
+			!strings.Contains(pair.Symbol, "3SUSDT")
+
+		if filterPairs {
+			tradePairsList = append(tradePairsList, pair.Symbol)
+		}
+	}
+
+	return tradePairsList
 }
 
-func main() {
-	for {
-		flag.Parse()
-		log.SetFlags(0)
+func Difference(a, b []string) (diff []string) {
+	m := make(map[string]bool)
 
-		interrupt := make(chan os.Signal, 1)
-		signal.Notify(interrupt, os.Interrupt)
+	for _, item := range b {
+		m[item] = true
+	}
 
-		u := url.URL{Scheme: "wss", Host: *addr, Path: "/ws"}
-		log.Printf("connecting to %s", u.String())
+	for _, item := range a {
+		if _, ok := m[item]; !ok {
+			diff = append(diff, item)
+		}
+	}
+	return
+}
 
-		c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-
+func SaveToFile(data []string, filename string) {
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Println("Create file: ", err)
+	}
+	defer func() {
+		err := file.Close()
 		if err != nil {
-			log.Fatal("dial:", err)
+			log.Println("File close: ", err)
+		}
+	}()
+
+	json_file, err := json.MarshalIndent(data, "", "\t")
+	if err != nil {
+		log.Fatalf("Error marshaling file %s", err)
+	}
+	_, err = io.Copy(file, bytes.NewReader(json_file))
+	if err != nil {
+		log.Println("Write to file: ", err)
+	}
+}
+
+func ReadFromFile(filename string) []string {
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Println("Open file: ", err)
+	}
+	defer func() {
+		err := file.Close()
+		if err != nil {
+			log.Println("File close: ", err)
+		}
+	}()
+
+	fileData, err := io.ReadAll(file)
+	if err != nil {
+		log.Println("Read file: ", err)
+	}
+
+	var tradePairs []string
+	err = json.Unmarshal(fileData, &tradePairs)
+	if err != nil {
+		log.Println("Unmarshal:", err)
+	}
+
+	return tradePairs
+}
+
+type ListingDiscordMessage struct {
+	Content string `json:"content"`
+}
+
+func SendDiscordMessage(tradePairs []string, category string) {
+	for _, pair := range tradePairs {
+		discordContent := pair + " opened for trading on Bybit " + category
+		body := ListingDiscordMessage{
+			Content: discordContent,
 		}
 
-		defer c.Close()
+		bodyBytes, err := json.Marshal(&body)
+		if err != nil {
+			log.Println("Marshall post message: ", err)
+		}
 
-		done := make(chan struct{})
+		reader := bytes.NewReader(bodyBytes)
 
-		go func() {
-			defer close(done)
-			for {
-				_, message, err := c.ReadMessage()
+		var req *http.Response
+		req, err = http.Post(os.Getenv("personal_test_webhook"), "application/json", reader)
+		if err != nil {
+			log.Println("Post:", err)
+		}
 
-				if err != nil {
-					log.Println("read:", err)
-					return
-				}
-
-				var tree_news Tree_News
-				err = json.Unmarshal(message, &tree_news)
-				if err != nil {
-					log.Println("Unmarshal:", err)
-					return
-				}
-
-				symbols, listing, err := parse_title(tree_news.Title)
-				if err != nil {
-					log.Println("parse_title:", err)
-					return
-				}
-
-				log.Printf("recv: %s, listing: %s, symbol: %s", tree_news.Title, listing, symbols)
-
-				if listing != NoListing {
-					send_discord_message(listing, symbols)
-				}
+		defer func() {
+			err := req.Body.Close()
+			if err != nil {
+				log.Println("Body close: ", err)
 			}
 		}()
 
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-done:
-				return
-			case t := <-ticker.C:
-				err := c.WriteMessage(websocket.TextMessage, []byte(t.String()))
-				if err != nil {
-					log.Println("write:", err)
-					return
-				}
-			case <-interrupt:
-				log.Println("interrupt")
-
-				err := c.WriteMessage(
-					websocket.CloseMessage,
-					websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
-				)
-				if err != nil {
-					log.Println("write close:", err)
-					return
-				}
-				select {
-				case <-done:
-				case <-time.After(time.Second):
-				}
-				return
-			}
+		requestBody, err := io.ReadAll(req.Body)
+		if err != nil {
+			log.Println("Read response body: ", err)
 		}
+
+		if req.StatusCode >= 400 && req.StatusCode <= 500 {
+			log.Println("Error response. Status Code: ", req.StatusCode)
+		}
+
+		log.Printf("Discord Request Body: %s", requestBody)
 	}
+
+}
+
+func main() {
+
+	urlSpot := url.URL{
+		Scheme:   "https",
+		Host:     "api.bybit.com",
+		Path:     "/v5/market/tickers",
+		RawQuery: "category=spot",
+	}
+	urlFutures := url.URL{
+		Scheme:   "https",
+		Host:     "api.bybit.com",
+		Path:     "/v5/market/tickers",
+		RawQuery: "category=linear",
+	}
+
+	spotPairs := getTradePairs(urlSpot)
+	futuresPairs := getTradePairs(urlFutures)
+
+	if _, err := os.Stat("spot_pairs.json"); err == nil {
+		oldSpotPairs := ReadFromFile("/data/spot_pairs.json")
+
+		diffSpot := Difference(spotPairs, oldSpotPairs)
+
+		SendDiscordMessage(diffSpot, "Spot")
+
+	}
+	if _, err := os.Stat("futures_pairs.json"); err == nil {
+		oldFuturesPairs := ReadFromFile("/data/futures_pairs.json")
+
+		diffFutures := Difference(futuresPairs, oldFuturesPairs)
+
+		SendDiscordMessage(diffFutures, "Futures")
+	}
+
+	SaveToFile(spotPairs, "/data/spot_pairs.json")
+	SaveToFile(futuresPairs, "/data/futures_pairs.json")
 }

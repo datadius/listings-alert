@@ -37,10 +37,9 @@ func getTradePairs(url url.URL) []string {
 		log.Println("Read response body: ", err)
 	}
 
-	log.Printf("Response Body: %s", responseBody)
-
 	if req.StatusCode >= 400 && req.StatusCode <= 500 {
 		log.Println("Error response. Status Code: ", req.StatusCode)
+		log.Println("Response Body: ", string(responseBody))
 	}
 
 	var tradePairs TradePairsResponse

@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -15,28 +17,6 @@ type TradePairsResponse struct {
 			Symbol string `json:"symbol"`
 		} `json:"list"`
 	} `json:"result"`
-}
-
-func main() {
-
-	urlSpot := url.URL{
-		Scheme:   "https",
-		Host:     "api.bybit.com",
-		Path:     "/v5/market/tickers",
-		RawQuery: "category=spot",
-	}
-	urlFutures := url.URL{
-		Scheme:   "https",
-		Host:     "api.bybit.com",
-		Path:     "/v5/market/tickers",
-		RawQuery: "category=linear",
-	}
-
-	spotPairs := getTradePairs(urlSpot)
-	futuresPairs := getTradePairs(urlFutures)
-
-	log.Println("Spot Pairs: ", strings.Join(spotPairs, ", "))
-	log.Println("Futures Pairs: ", strings.Join(futuresPairs, ", "))
 }
 
 func getTradePairs(url url.URL) []string {
@@ -82,4 +62,104 @@ func getTradePairs(url url.URL) []string {
 	}
 
 	return tradePairsList
+}
+
+func Difference(a, b []string) (diff []string) {
+	m := make(map[string]bool)
+
+	for _, item := range b {
+		m[item] = true
+	}
+
+	for _, item := range a {
+		if _, ok := m[item]; !ok {
+			diff = append(diff, item)
+		}
+	}
+	return
+}
+
+func SaveToFile(data []string, filename string) {
+	file, err := os.Create(filename)
+	if err != nil {
+		log.Println("Create file: ", err)
+	}
+	defer func() {
+		err := file.Close()
+		if err != nil {
+			log.Println("File close: ", err)
+		}
+	}()
+
+	json_file, err := json.MarshalIndent(data, "", "\t")
+	if err != nil {
+		log.Fatalf("Error marshaling file %s", err)
+	}
+	_, err = io.Copy(file, bytes.NewReader(json_file))
+	if err != nil {
+		log.Println("Write to file: ", err)
+	}
+}
+
+func ReadFromFile(filename string) []string {
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Println("Open file: ", err)
+	}
+	defer func() {
+		err := file.Close()
+		if err != nil {
+			log.Println("File close: ", err)
+		}
+	}()
+
+	fileData, err := io.ReadAll(file)
+	if err != nil {
+		log.Println("Read file: ", err)
+	}
+
+	var tradePairs []string
+	err = json.Unmarshal(fileData, &tradePairs)
+	if err != nil {
+		log.Println("Unmarshal:", err)
+	}
+
+	return tradePairs
+}
+
+func main() {
+
+	urlSpot := url.URL{
+		Scheme:   "https",
+		Host:     "api.bybit.com",
+		Path:     "/v5/market/tickers",
+		RawQuery: "category=spot",
+	}
+	urlFutures := url.URL{
+		Scheme:   "https",
+		Host:     "api.bybit.com",
+		Path:     "/v5/market/tickers",
+		RawQuery: "category=linear",
+	}
+
+	spotPairs := getTradePairs(urlSpot)
+	futuresPairs := getTradePairs(urlFutures)
+
+	if _, err := os.Stat("spot_pairs.json"); err == nil {
+		oldSpotPairs := ReadFromFile("spot_pairs.json")
+
+		diffSpot := Difference(spotPairs, oldSpotPairs)
+
+		log.Println("Spot Pairs: ", strings.Join(diffSpot, ", "))
+	}
+	if _, err := os.Stat("futures_pairs.json"); err == nil {
+		oldFuturesPairs := ReadFromFile("futures_pairs.json")
+
+		diffFutures := Difference(futuresPairs, oldFuturesPairs)
+
+		log.Println("Futures Pairs: ", strings.Join(diffFutures, ", "))
+	}
+
+	SaveToFile(spotPairs, "spot_pairs.json")
+	SaveToFile(futuresPairs, "futures_pairs.json")
 }

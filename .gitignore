@@ -19,3 +19,5 @@
 
 # Go workspace file
 go.work
+spot_pairs.json
+futures_pairs.json

@@ -99,12 +99,15 @@ func SaveToFile(data []string, filename string) {
 	if err != nil {
 		log.Println("Write to file: ", err)
 	}
+
+	log.Printf("File %s created", filename)
 }
 
 func ReadFromFile(filename string) []string {
 	file, err := os.Open(filename)
 	if err != nil {
 		log.Println("Open file: ", err)
+		os.Exit(1)
 	}
 	defer func() {
 		err := file.Close()
@@ -123,6 +126,9 @@ func ReadFromFile(filename string) []string {
 	if err != nil {
 		log.Println("Unmarshal:", err)
 	}
+
+	log.Printf("File %s read", filename)
+	log.Printf("Slice size %s", len(tradePairs))
 
 	return tradePairs
 }

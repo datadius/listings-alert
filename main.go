@@ -80,10 +80,11 @@ func (l Listing) String() string {
 
 func send_discord_message(listing Listing, symbols [][]string) string {
 
-	bodyString := listing.String() + ":"
+	bodyString := ""
 	for _, symbol := range symbols {
 		if symbol[1] != "" {
-			bodyString = bodyString + "\n" + symbol[1]
+			// Add time to the message
+			bodyString = bodyString + symbol[1] + " " + listing.String() + "\n"
 		}
 	}
 
@@ -124,85 +125,87 @@ func send_discord_message(listing Listing, symbols [][]string) string {
 }
 
 func main() {
-	flag.Parse()
-	log.SetFlags(0)
-
-	interrupt := make(chan os.Signal, 1)
-	signal.Notify(interrupt, os.Interrupt)
-
-	u := url.URL{Scheme: "wss", Host: *addr, Path: "/ws"}
-	log.Printf("connecting to %s", u.String())
-
-	c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
-
-	if err != nil {
-		log.Fatal("dial:", err)
-	}
-
-	defer c.Close()
-
-	done := make(chan struct{})
-
-	go func() {
-		defer close(done)
-		for {
-			_, message, err := c.ReadMessage()
-
-			if err != nil {
-				log.Println("read:", err)
-				return
-			}
-
-			var tree_news Tree_News
-			err = json.Unmarshal(message, &tree_news)
-			if err != nil {
-				log.Println("Unmarshal:", err)
-				return
-			}
-
-			symbols, listing, err := parse_title(tree_news.Title)
-			if err != nil {
-				log.Println("parse_title:", err)
-				return
-			}
-
-			log.Printf("recv: %s, listing: %s, symbol: %s", tree_news.Title, listing, symbols)
-
-			if listing != NoListing {
-				send_discord_message(listing, symbols)
-			}
-		}
-	}()
-
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
 	for {
-		select {
-		case <-done:
-			return
-		case t := <-ticker.C:
-			err := c.WriteMessage(websocket.TextMessage, []byte(t.String()))
-			if err != nil {
-				log.Println("write:", err)
-				return
-			}
-		case <-interrupt:
-			log.Println("interrupt")
+		flag.Parse()
+		log.SetFlags(0)
 
-			err := c.WriteMessage(
-				websocket.CloseMessage,
-				websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
-			)
-			if err != nil {
-				log.Println("write close:", err)
-				return
+		interrupt := make(chan os.Signal, 1)
+		signal.Notify(interrupt, os.Interrupt)
+
+		u := url.URL{Scheme: "wss", Host: *addr, Path: "/ws"}
+		log.Printf("connecting to %s", u.String())
+
+		c, _, err := websocket.DefaultDialer.Dial(u.String(), nil)
+
+		if err != nil {
+			log.Fatal("dial:", err)
+		}
+
+		defer c.Close()
+
+		done := make(chan struct{})
+
+		go func() {
+			defer close(done)
+			for {
+				_, message, err := c.ReadMessage()
+
+				if err != nil {
+					log.Println("read:", err)
+					return
+				}
+
+				var tree_news Tree_News
+				err = json.Unmarshal(message, &tree_news)
+				if err != nil {
+					log.Println("Unmarshal:", err)
+					return
+				}
+
+				symbols, listing, err := parse_title(tree_news.Title)
+				if err != nil {
+					log.Println("parse_title:", err)
+					return
+				}
+
+				log.Printf("recv: %s, listing: %s, symbol: %s", tree_news.Title, listing, symbols)
+
+				if listing != NoListing {
+					send_discord_message(listing, symbols)
+				}
 			}
+		}()
+
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+
+		for {
 			select {
 			case <-done:
-			case <-time.After(time.Second):
+				return
+			case t := <-ticker.C:
+				err := c.WriteMessage(websocket.TextMessage, []byte(t.String()))
+				if err != nil {
+					log.Println("write:", err)
+					return
+				}
+			case <-interrupt:
+				log.Println("interrupt")
+
+				err := c.WriteMessage(
+					websocket.CloseMessage,
+					websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+				)
+				if err != nil {
+					log.Println("write close:", err)
+					return
+				}
+				select {
+				case <-done:
+				case <-time.After(time.Second):
+				}
+				return
 			}
-			return
 		}
 	}
 }

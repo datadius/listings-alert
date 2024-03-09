@@ -196,7 +196,7 @@ func main() {
 	spotPairs := getTradePairs(urlSpot)
 	futuresPairs := getTradePairs(urlFutures)
 
-	if _, err := os.Stat("spot_pairs.json"); err == nil {
+	if _, err := os.Stat("/data/spot_pairs.json"); err == nil {
 		oldSpotPairs := ReadFromFile("/data/spot_pairs.json")
 
 		diffSpot := Difference(spotPairs, oldSpotPairs)
@@ -204,7 +204,7 @@ func main() {
 		SendDiscordMessage(diffSpot, "Spot")
 
 	}
-	if _, err := os.Stat("futures_pairs.json"); err == nil {
+	if _, err := os.Stat("/data/futures_pairs.json"); err == nil {
 		oldFuturesPairs := ReadFromFile("/data/futures_pairs.json")
 
 		diffFutures := Difference(futuresPairs, oldFuturesPairs)

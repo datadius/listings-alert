@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
+	"runtime"
 	"strings"
-	"time"
+	"syscall"
 )
 
 type TradePairsResponse struct {
@@ -182,6 +184,14 @@ func SendDiscordMessage(tradePairs []string, category string) {
 }
 
 func main() {
+	pathSpot := "/data/spot_pairs.json"
+	pathFutures := "/data/futures_pairs.json"
+
+	if runtime.GOOS == "windows" {
+		log.Println("Running on Windows")
+		pathSpot = "./data/spot_pairs.json"
+		pathFutures = "./data/futures_pairs.json"
+	}
 
 	urlSpot := url.URL{
 		Scheme:   "https",
@@ -201,29 +211,32 @@ func main() {
 		log.Println("Error creating scheduler: ", err)
 	}
 
-	j, err := scheduler.NewJob(gocron.CronJob("* * * * *", false), gocron.NewTask(func() {
-		spotPairs := getTradePairs(urlSpot)
-		futuresPairs := getTradePairs(urlFutures)
+	j, err := scheduler.NewJob(
+		gocron.CronJob("* * * * *", false),
+		gocron.NewTask(func(pathSpot, pathFutures string) {
+			spotPairs := getTradePairs(urlSpot)
+			futuresPairs := getTradePairs(urlFutures)
 
-		if _, err := os.Stat("/data/spot_pairs.json"); err == nil {
-			oldSpotPairs := ReadFromFile("/data/spot_pairs.json")
+			if _, err := os.Stat(pathSpot); err == nil {
+				oldSpotPairs := ReadFromFile(pathSpot)
 
-			diffSpot := Difference(spotPairs, oldSpotPairs)
+				diffSpot := Difference(spotPairs, oldSpotPairs)
 
-			SendDiscordMessage(diffSpot, "Spot")
+				SendDiscordMessage(diffSpot, "Spot")
 
-		}
-		if _, err := os.Stat("/data/futures_pairs.json"); err == nil {
-			oldFuturesPairs := ReadFromFile("/data/futures_pairs.json")
+			}
+			if _, err := os.Stat(pathFutures); err == nil {
+				oldFuturesPairs := ReadFromFile(pathFutures)
 
-			diffFutures := Difference(futuresPairs, oldFuturesPairs)
+				diffFutures := Difference(futuresPairs, oldFuturesPairs)
 
-			SendDiscordMessage(diffFutures, "Futures")
-		}
+				SendDiscordMessage(diffFutures, "Futures")
+			}
 
-		SaveToFile(spotPairs, "/data/spot_pairs.json")
-		SaveToFile(futuresPairs, "/data/futures_pairs.json")
-	}))
+			SaveToFile(spotPairs, pathSpot)
+			SaveToFile(futuresPairs, pathFutures)
+		}, pathSpot, pathFutures),
+	)
 
 	if err != nil {
 		log.Println("Issue creating cron job: ", err)
@@ -234,8 +247,11 @@ func main() {
 	scheduler.Start()
 
 	// block until you are ready to shut down
+	done := make(chan os.Signal, 1)
+	signal.Notify(done, syscall.SIGINT, syscall.SIGTERM)
+	log.Println("Blocking, press ctrl+c to exit...")
 	select {
-	case <-time.After(time.Minute):
+	case <-done:
 	}
 
 	// when you're done, shut it down

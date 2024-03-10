@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/go-co-op/gocron/v2"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 type TradePairsResponse struct {
@@ -194,25 +196,51 @@ func main() {
 		RawQuery: "category=linear",
 	}
 
-	spotPairs := getTradePairs(urlSpot)
-	futuresPairs := getTradePairs(urlFutures)
-
-	if _, err := os.Stat("/data/spot_pairs.json"); err == nil {
-		oldSpotPairs := ReadFromFile("/data/spot_pairs.json")
-
-		diffSpot := Difference(spotPairs, oldSpotPairs)
-
-		SendDiscordMessage(diffSpot, "Spot")
-
-	}
-	if _, err := os.Stat("/data/futures_pairs.json"); err == nil {
-		oldFuturesPairs := ReadFromFile("/data/futures_pairs.json")
-
-		diffFutures := Difference(futuresPairs, oldFuturesPairs)
-
-		SendDiscordMessage(diffFutures, "Futures")
+	scheduler, err := gocron.NewScheduler()
+	if err != nil {
+		log.Println("Error creating scheduler: ", err)
 	}
 
-	SaveToFile(spotPairs, "/data/spot_pairs.json")
-	SaveToFile(futuresPairs, "/data/futures_pairs.json")
+	j, err := scheduler.NewJob(gocron.CronJob("* * * * *", false), gocron.NewTask(func() {
+		spotPairs := getTradePairs(urlSpot)
+		futuresPairs := getTradePairs(urlFutures)
+
+		if _, err := os.Stat("/data/spot_pairs.json"); err == nil {
+			oldSpotPairs := ReadFromFile("/data/spot_pairs.json")
+
+			diffSpot := Difference(spotPairs, oldSpotPairs)
+
+			SendDiscordMessage(diffSpot, "Spot")
+
+		}
+		if _, err := os.Stat("/data/futures_pairs.json"); err == nil {
+			oldFuturesPairs := ReadFromFile("/data/futures_pairs.json")
+
+			diffFutures := Difference(futuresPairs, oldFuturesPairs)
+
+			SendDiscordMessage(diffFutures, "Futures")
+		}
+
+		SaveToFile(spotPairs, "/data/spot_pairs.json")
+		SaveToFile(futuresPairs, "/data/futures_pairs.json")
+	}))
+
+	if err != nil {
+		log.Println("Issue creating cron job: ", err)
+	}
+
+	log.Println("Starting cron job ", j.ID())
+
+	scheduler.Start()
+
+	// block until you are ready to shut down
+	select {
+	case <-time.After(time.Minute):
+	}
+
+	// when you're done, shut it down
+	err = scheduler.Shutdown()
+	if err != nil {
+		// handle error
+	}
 }

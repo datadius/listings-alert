@@ -105,7 +105,6 @@ func SaveToFile(data []string, filename string) {
 		log.Println("Write to file: ", err)
 	}
 
-	log.Printf("File %s created", filename)
 }
 
 func ReadFromFile(filename string) []string {
@@ -132,7 +131,6 @@ func ReadFromFile(filename string) []string {
 		log.Println("Unmarshal:", err)
 	}
 
-	log.Printf("File %s read", filename)
 	log.Printf("Slice size %d", len(tradePairs))
 
 	return tradePairs

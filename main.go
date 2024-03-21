@@ -143,44 +143,47 @@ type ListingDiscordMessage struct {
 }
 
 func SendDiscordMessage(tradePairs []string, category string) {
-	for _, pair := range tradePairs {
-		discordContent := pair + " opened for trading on Bybit " + category
-		body := ListingDiscordMessage{
-			Content: discordContent,
-		}
-
-		bodyBytes, err := json.Marshal(&body)
-		if err != nil {
-			log.Println("Marshall post message: ", err)
-		}
-
-		reader := bytes.NewReader(bodyBytes)
-
-		var req *http.Response
-		req, err = http.Post(os.Getenv("personal_test_webhook"), "application/json", reader)
-		if err != nil {
-			log.Println("Post:", err)
-		}
-
-		defer func() {
-			err := req.Body.Close()
-			if err != nil {
-				log.Println("Body close: ", err)
+	// Insurance to avoid sending too many messages to discord
+	// There is a issue with bybit API where I get an empty response and then it thinks there are more coins
+	if len(tradePairs) < 5 {
+		for _, pair := range tradePairs {
+			discordContent := pair + " opened for trading on Bybit " + category
+			body := ListingDiscordMessage{
+				Content: discordContent,
 			}
-		}()
 
-		requestBody, err := io.ReadAll(req.Body)
-		if err != nil {
-			log.Println("Read response body: ", err)
+			bodyBytes, err := json.Marshal(&body)
+			if err != nil {
+				log.Println("Marshall post message: ", err)
+			}
+
+			reader := bytes.NewReader(bodyBytes)
+
+			var req *http.Response
+			req, err = http.Post(os.Getenv("personal_test_webhook"), "application/json", reader)
+			if err != nil {
+				log.Println("Post:", err)
+			}
+
+			defer func() {
+				err := req.Body.Close()
+				if err != nil {
+					log.Println("Body close: ", err)
+				}
+			}()
+
+			requestBody, err := io.ReadAll(req.Body)
+			if err != nil {
+				log.Println("Read response body: ", err)
+			}
+
+			if req.StatusCode >= 400 && req.StatusCode <= 500 {
+				log.Println("Error response. Status Code: ", req.StatusCode)
+			}
+
+			log.Printf("Discord Request Body: %s", requestBody)
 		}
-
-		if req.StatusCode >= 400 && req.StatusCode <= 500 {
-			log.Println("Error response. Status Code: ", req.StatusCode)
-		}
-
-		log.Printf("Discord Request Body: %s", requestBody)
 	}
-
 }
 
 func main() {
@@ -220,17 +223,21 @@ func main() {
 			if _, err := os.Stat(pathSpot); err == nil {
 				oldSpotPairs := ReadFromFile(pathSpot)
 
-				diffSpot := Difference(spotPairs, oldSpotPairs)
+				if len(spotPairs) != 0 {
+					diffSpot := Difference(spotPairs, oldSpotPairs)
 
-				SendDiscordMessage(diffSpot, "Spot")
+					SendDiscordMessage(diffSpot, "Spot")
+				}
 
 			}
 			if _, err := os.Stat(pathFutures); err == nil {
 				oldFuturesPairs := ReadFromFile(pathFutures)
 
-				diffFutures := Difference(futuresPairs, oldFuturesPairs)
+				if len(futuresPairs) != 0 {
+					diffFutures := Difference(futuresPairs, oldFuturesPairs)
 
-				SendDiscordMessage(diffFutures, "Futures")
+					SendDiscordMessage(diffFutures, "Futures")
+				}
 			}
 
 			SaveToFile(spotPairs, pathSpot)
